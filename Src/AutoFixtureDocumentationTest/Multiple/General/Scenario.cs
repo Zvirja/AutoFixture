@@ -95,10 +95,10 @@ namespace AutoFixtureDocumentationTest.Multiple.General
         {
             var fixture = new Fixture();
             fixture
-                .Customizations
+                .PredefinedBuilders
                 .OfType<StableFiniteSequenceRelay>()
                 .ToList()
-                .ForEach(c => fixture.Customizations.Remove(c));
+                .ForEach(c => fixture.PredefinedBuilders.Remove(c));
 
             var expected =
                 fixture.CreateMany<string>();
@@ -110,10 +110,10 @@ namespace AutoFixtureDocumentationTest.Multiple.General
         {
             var fixture = new Fixture();
             fixture
-                .Customizations
+                .PredefinedBuilders
                 .OfType<StableFiniteSequenceRelay>()
                 .ToList()
-                .ForEach(c => fixture.Customizations.Remove(c));
+                .ForEach(c => fixture.PredefinedBuilders.Remove(c));
 
             var expected =
                 fixture.Create<IEnumerable<string>>();

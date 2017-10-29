@@ -124,6 +124,19 @@ namespace AutoFixtureUnitTest
             return sut.Builder;
         }
     }
+    
+    public class PredefinedBuildersNodeTests: MarkerNodeTests<PredefinedBuildersNode>
+    {
+        public override PredefinedBuildersNode CreateSut(ISpecimenBuilder builder)
+        {
+            return new PredefinedBuildersNode(builder);
+        }
+
+        public override ISpecimenBuilder GetBuilder(PredefinedBuildersNode sut)
+        {
+            return sut.Builder;
+        }
+    }
 
     public class CustomizationNodeTests : MarkerNodeTests<CustomizationNode>
     {

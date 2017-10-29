@@ -5049,11 +5049,11 @@ namespace AutoFixtureUnitTest
         }
 
         [Fact]
-        public void CustomizationsContainStableFiniteSequenceRelayByDefault()
+        public void PredefinedBuildersContainStableFiniteSequenceRelayByDefault()
         {
             var sut = new Fixture();
             Assert.True(
-                sut.Customizations.OfType<StableFiniteSequenceRelay>().Any(),
+                sut.PredefinedBuilders.OfType<StableFiniteSequenceRelay>().Any(),
                 "Stable finite sequence relay not found.");
         }
 
@@ -5078,12 +5078,12 @@ namespace AutoFixtureUnitTest
         [InlineData(typeof(HashSetSpecification), typeof(EnumerableFavoringConstructorQuery))]
         [InlineData(typeof(CollectionSpecification), typeof(ListFavoringConstructorQuery))]
         [InlineData(typeof(ObservableCollectionSpecification), typeof(EnumerableFavoringConstructorQuery))]
-        public void CustomizationsContainBuilderForProperConcreteMultipleTypeByDefault(
+        public void PredefinedBuildersContainBuilderForProperConcreteMultipleTypeByDefault(
             Type specificationType,
             Type queryType)
         {
             var sut = new Fixture();
-            Assert.True(sut.Customizations
+            Assert.True(sut.PredefinedBuilders
                 .OfType<FilteringSpecimenBuilder>()
                 .Where(b => specificationType.IsAssignableFrom(b.Specification.GetType()))
                 .Where(b => typeof(MethodInvoker).IsAssignableFrom(b.Builder.GetType()))
@@ -5093,10 +5093,10 @@ namespace AutoFixtureUnitTest
         }
 
         [Fact]
-        public void CustomizationsContainBuilderForConcreteDictionariesByDefault()
+        public void PredefinedBuldersContainBuilderForConcreteDictionariesByDefault()
         {
             var sut = new Fixture();
-            Assert.True(sut.Customizations
+            Assert.True(sut.PredefinedBuilders
                 .OfType<FilteringSpecimenBuilder>()
                 .Where(b => typeof(DictionarySpecification).IsAssignableFrom(b.Specification.GetType()))
                 .Where(b => typeof(Postprocessor).IsAssignableFrom(b.Builder.GetType()))
@@ -5106,6 +5106,18 @@ namespace AutoFixtureUnitTest
                 .Select(p => (MethodInvoker)p.Builder)
                 .Where(i => typeof(ModestConstructorQuery).IsAssignableFrom(i.Query.GetType()))
                 .Any());
+        }
+
+
+        [Fact]
+        public void CustomizationsShouldBeEmptyByDefault()
+        {
+            // Fixture setup
+            var sut = new Fixture();
+            
+            // Exercise system and verify outcome
+            Assert.Empty(sut.Customizations);
+            // Teardown
         }
 
         [Fact]
@@ -6077,5 +6089,19 @@ namespace AutoFixtureUnitTest
             Assert.Equal(expectedValue, result);
             // Teardown
         }
+
+        [Fact]
+        public void PredefinedBuildersShouldContainEnginePostProcessor()
+        {
+            // Fixture setup
+            var sut = new Fixture();
+            sut.OmitAutoProperties = false;
+
+            // Exercise system and verify outcome
+            Assert.Contains(sut.PredefinedBuilders, b => b is Postprocessor);
+            // Teardown
+        }
+        
+        
     }
 }

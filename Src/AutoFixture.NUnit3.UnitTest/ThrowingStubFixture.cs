@@ -21,6 +21,8 @@ namespace AutoFixture.NUnit3.UnitTest
             get { throw new NotImplementedException(); }
         }
 
+        public IList<ISpecimenBuilder> PredefinedBuilders => throw new NotImplementedException();
+
         public bool OmitAutoProperties
         {
             get

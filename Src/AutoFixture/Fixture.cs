@@ -19,6 +19,7 @@ namespace AutoFixture
     {
         private SingletonSpecimenBuilderNodeStackAdapterCollection behaviors;
         private SpecimenBuilderNodeAdapterCollection customizer;
+        private SpecimenBuilderNodeAdapterCollection predefinedBuilders;
         private SpecimenBuilderNodeAdapterCollection residueCollector;
         private readonly MultipleRelay multiple;
 
@@ -66,7 +67,8 @@ namespace AutoFixture
             this.graph =
                 new BehaviorRoot(
                     new TerminatingWithPathSpecimenBuilder(new CompositeSpecimenBuilder(
-                        new CustomizationNode(
+                        new CustomizationNode(new CompositeSpecimenBuilder()),
+                        new PredefinedBuildersNode(
                             new CompositeSpecimenBuilder(
                                 new FilteringSpecimenBuilder(
                                     new FixedBuilder(
@@ -128,14 +130,14 @@ namespace AutoFixture
                                 new LambdaExpressionGenerator(),
                                 CreateDefaultValueBuilder(CultureInfo.InvariantCulture),
                                 CreateDefaultValueBuilder(Encoding.UTF8),
-                                CreateDefaultValueBuilder(IPAddress.Loopback))),
-                        new Postprocessor(
-                            new AutoPropertiesTarget(
-                                new CompositeSpecimenBuilder(
-                                    engine,
-                                    multiple)),
-                            new AutoPropertiesCommand(),
-                            new AnyTypeSpecification()),
+                                CreateDefaultValueBuilder(IPAddress.Loopback),
+                                new Postprocessor(
+                                    new AutoPropertiesTarget(
+                                        new CompositeSpecimenBuilder(
+                                            engine,
+                                            multiple)),
+                                    new AutoPropertiesCommand(),
+                                    new AnyTypeSpecification()))),
                         new ResidueCollectorNode(
                             new CompositeSpecimenBuilder(
                                 new DictionaryRelay(),
@@ -149,6 +151,7 @@ namespace AutoFixture
                                 new ValueTypeSpecification(),
                                 new NoConstructorsSpecification())))));
 
+            this.UpdatePredefinedBuilders();
             this.UpdateCustomizer();
             this.UpdateResidueCollector();
             this.UpdateBehaviors(new ISpecimenBuilderTransformation[0]);
@@ -156,33 +159,11 @@ namespace AutoFixture
             this.behaviors.Add(new ThrowingRecursionBehavior());
         }
 
-        /// <summary>
-        /// Gets the behaviors that wrap around the rest of the graph.
-        /// </summary>
-        public IList<ISpecimenBuilderTransformation> Behaviors
-        {
-            get { return this.behaviors; }
-        }
+        /// <inheritdoc />
+        public IList<ISpecimenBuilderTransformation> Behaviors => this.behaviors;
 
-        /// <summary>
-        /// Gets the customizations that intercept the <see cref="Engine"/>.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// Any <see cref="ISpecimenBuilder"/> in this list are invoked before
-        /// <see cref="Engine"/>, giving them a chance to intercept a request and resolve it before
-        /// the Engine.
-        /// </para>
-        /// <para>
-        /// <see cref="Customize{T}"/> places resulting customizations in this list.
-        /// </para>
-        /// </remarks>
-        /// <seealso cref="Engine"/>
-        /// <seealso cref="ResidueCollectors"/>
-        public IList<ISpecimenBuilder> Customizations
-        {
-            get { return this.customizer; }
-        }
+        /// <inheritdoc />
+        public IList<ISpecimenBuilder> Customizations => this.customizer;
 
         /// <summary>
         /// Gets the core engine of the <see cref="Fixture"/> instance.
@@ -248,6 +229,9 @@ namespace AutoFixture
                 this.OnGraphChanged(this, new SpecimenBuilderNodeEventArgs(g));
             }
         }
+        
+        /// <inheritdoc />
+        public IList<ISpecimenBuilder> PredefinedBuilders => this.predefinedBuilders;
 
         /// <summary>
         /// Gets or sets a number that controls how many objects are created when a
@@ -267,21 +251,8 @@ namespace AutoFixture
             set { this.multiple.Count = value; }
         }
 
-        /// <summary>
-        /// Gets the residue collectors that can be used to handle requests that neither the
-        /// <see cref="Customizations"/> nor <see cref="Engine"/> could handle.
-        /// </summary>
-        /// <remarks>
-        /// <para>
-        /// These <see cref="ISpecimenBuilder"/> instances will be invoked if no previous builder
-        /// could resolve a request. This gives you the opportunity to define fallback strategies
-        /// to deal with unresolved requests.
-        /// </para>
-        /// </remarks>
-        public IList<ISpecimenBuilder> ResidueCollectors
-        {
-            get { return this.residueCollector; }
-        }
+        /// <inheritdoc />
+        public IList<ISpecimenBuilder> ResidueCollectors => this.residueCollector;
 
         /// <summary>
         /// Customizes the creation algorithm for a single object, effectively turning off all
@@ -421,9 +392,19 @@ namespace AutoFixture
 
             this.graph = e.Graph;
 
+            this.UpdatePredefinedBuilders();
             this.UpdateCustomizer();
             this.UpdateResidueCollector();
             this.UpdateBehaviors(transformations);
+        }
+
+        private void UpdatePredefinedBuilders()
+        {
+            this.predefinedBuilders =
+                new SpecimenBuilderNodeAdapterCollection(
+                    this.graph,
+                    n => n is PredefinedBuildersNode);
+            this.predefinedBuilders.GraphChanged += this.OnGraphChanged;
         }
 
         private void UpdateCustomizer()

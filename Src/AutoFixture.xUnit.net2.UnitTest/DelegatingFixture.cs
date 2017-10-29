@@ -27,6 +27,8 @@ namespace AutoFixture.Xunit2.UnitTest
             get { return this.customizations; }
         }
 
+        public IList<ISpecimenBuilder> PredefinedBuilders => throw new NotImplementedException();
+
         public bool OmitAutoProperties { get; set; }
 
         public int RepeatCount { get; set; }

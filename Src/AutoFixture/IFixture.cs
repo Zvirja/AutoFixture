@@ -11,16 +11,42 @@ namespace AutoFixture
     public interface IFixture : ISpecimenBuilder
     {
         /// <summary>
-        /// Gets the behaviors that are applied as Decorators around other
-        /// parts of a Fixture.
-        /// is invoked.
+        /// Gets the behaviors that are applied as Decorators around other parts of a Fixture.
         /// </summary>
         IList<ISpecimenBuilderTransformation> Behaviors { get; }
 
         /// <summary>
-        /// Gets customizations.
+        /// Gets the customizations that intercept the <see cref="PredefinedBuilders"/>.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// Any <see cref="ISpecimenBuilder"/> in this list are invoked before
+        /// <see cref="PredefinedBuilders"/>, giving them a chance to intercept a request and resolve it before
+        /// the Engine.
+        /// </para>
+        /// <para>
+        /// <see cref="Customize{T}"/> places resulting customizations in this list.
+        /// </para>
+        /// </remarks>
+        /// <seealso cref="PredefinedBuilders"/>
+        /// <seealso cref="ResidueCollectors"/>
         IList<ISpecimenBuilder> Customizations { get; }
+
+        /// <summary>
+        /// Gets a collection of the predefined specimen builders that activate request.
+        /// <remarks>
+        /// <para>
+        /// You should always use the <see cref="Customizations"/> or <see cref="Behaviors"/> collections to customize
+        /// the fixture. The <see cref="PredefinedBuilders"/> collection should be used only if the aforementioned
+        /// collections cannot cover your needs. The reason is that default builders might be changed frequently, 
+        /// so it might be not safe to depend on it.
+        /// </para>
+        /// </remarks>
+        /// <seealso cref="Behaviors"/>
+        /// <seealso cref="Customizations"/>
+        /// <seealso cref="ResidueCollectors"/>
+        /// </summary>
+        IList<ISpecimenBuilder> PredefinedBuilders { get; }
 
         /// <summary>
         /// Gets or sets if writable properties should generally be assigned a value when 
