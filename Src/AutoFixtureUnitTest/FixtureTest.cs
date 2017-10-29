@@ -6102,6 +6102,24 @@ namespace AutoFixtureUnitTest
             // Teardown
         }
         
+        [StringLength(10, MinimumLength = 10)]
+        public static string FieldWithStringLengthAnnotation;
         
+        [Fact]
+        public void NoDataAnnotationsCustomizationDisablesAnnotationsSupport()
+        {
+            // Fixture setup
+            var request = this.GetType().GetField(nameof(FieldWithStringLengthAnnotation));
+            var fixture = new Fixture();
+            var sut = new NoDataAnnotationsCustomization();
+
+            // Exercise system
+            fixture.Customize(sut);
+            var result = (string)fixture.Create(request, new SpecimenContext(fixture));
+
+            // Verify outcome
+            Assert.NotEqual(10, result.Length);
+            // Teardown
+        }
     }
 }

@@ -32,14 +32,14 @@ namespace AutoFixture
             {
                 typeof (RangeAttributeRelay),
                 typeof (StringLengthAttributeRelay),
-                typeof (RegularExpressionAttributeRelay),
+                typeof (RegularExpressionAttributeRelay)
             };
 
             fixture
-                .Customizations
+                .PredefinedBuilders
                 .Where(c => dataAnnotationsRelayTypes.Contains(c.GetType()))
                 .ToList()
-                .ForEach(c => fixture.Customizations.Remove(c));
+                .ForEach(c => fixture.PredefinedBuilders.Remove(c));
         }
     }
 }

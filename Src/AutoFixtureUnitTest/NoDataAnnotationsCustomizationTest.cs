@@ -41,7 +41,7 @@ namespace AutoFixtureUnitTest
             // Exercise system
             sut.Customize(fixture);
 
-            var results = fixture.Customizations
+            var results = fixture.PredefinedBuilders
                 .SingleOrDefault(c => c.GetType() == removedBuilderType);
             // Verify outcome
             Assert.Null(results);
