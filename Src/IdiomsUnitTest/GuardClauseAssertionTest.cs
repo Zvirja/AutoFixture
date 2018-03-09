@@ -857,10 +857,11 @@ namespace AutoFixture.IdiomsUnitTest
 
         [Theory]
         [ClassData(typeof(MethodDataOnGuardedGeneric))]
-        public void VerifyMethodOnGuardedGenericDoesNotThrow(MethodInfo methodInfo)
+        public void VerifyMethodOnGuardedGenericDoesNotThrow(MemberData<MethodInfo> methodMember)
         {
             // Arrange
             var sut = new GuardClauseAssertion(new Fixture());
+            var methodInfo = methodMember.Member;
             // Act
             // Assert
             Assert.Null(Record.Exception(() => sut.Verify(methodInfo)));
@@ -1142,12 +1143,16 @@ namespace AutoFixture.IdiomsUnitTest
         {
             public IEnumerator<Type> GetEnumerator()
             {
-                yield return typeof(NoContraint<>);
+/*                yield return typeof(NoContraint<>);
                 yield return typeof(InterfacesContraint<>);
-                yield return typeof(StructureAndInterfacesContraint<>);
+                yield return typeof(StructureAndInterfacesContraint<>);*/
+                yield return typeof(GenericArgumentUsingConstrain_3<>);
+/*                yield return typeof(GenericArgumentUsingConstrain_2<,>);
+                yield return typeof(GenericArgumentUsingConstrain_3<>);
+                yield return typeof(GenericArgumentUsingConstrain_4<,>);
                 yield return typeof(ParameterizedConstructorTestConstraint<>);
                 yield return typeof(UnclosedGenericMethodTestType<>);
-                yield return typeof(NestedGenericParameterTestType<,>);
+                yield return typeof(NestedGenericParameterTestType<,>);*/
             }
 
             IEnumerator IEnumerable.GetEnumerator()
@@ -1247,7 +1252,7 @@ namespace AutoFixture.IdiomsUnitTest
                 var bindingFlags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
                 return new GuardedGenericData().SelectMany(t => t.GetMethods(bindingFlags))
                                                .Where(m => !m.Name.StartsWith("get_") && !m.Name.StartsWith("set_"))
-                                               .Select(m => new object[] { m })
+                                               .Select(m => new object[] { new MemberData<MethodInfo>(m) })
                                                .GetEnumerator();
             }
 
@@ -1321,6 +1326,50 @@ namespace AutoFixture.IdiomsUnitTest
             }
 
             public void Method(T argument)
+            {
+            }
+        }
+
+        private class GenericArgumentUsingConstrain_1<T> where T : struct, IEquatable<T>
+        {
+            public GenericArgumentUsingConstrain_1(T argument)
+            {
+            }
+
+            public void Method(T argument)
+            {
+            }
+        }
+        
+        private class GenericArgumentUsingConstrain_2<T1, T2> where T1: IEquatable<T2> where T2: IEnumerable<T1>
+        {
+            public GenericArgumentUsingConstrain_2(T1 arg1, T2 arg2)
+            {
+            }
+
+            public void Method(T1 argument)
+            {
+            }
+        }
+        
+        private class GenericArgumentUsingConstrain_3<T> where T: List<T>
+        {
+            public GenericArgumentUsingConstrain_3(T arg)
+            {
+            }
+
+            public void Method(T argument)
+            {
+            }
+        }
+        
+        private class GenericArgumentUsingConstrain_4<T1, T2> where T1: IEnumerable<KeyValuePair<T1, IEnumerable<T2>>>
+        {
+            public GenericArgumentUsingConstrain_4(T1 arg)
+            {
+            }
+
+            public void Method(T1 argument)
             {
             }
         }
@@ -1837,6 +1886,18 @@ namespace AutoFixture.IdiomsUnitTest
         private abstract class AbstractTypeWithAbstractMethod
         {
             public abstract void Method(object arg);
+        }
+
+        public class MemberData<T> where T: MemberInfo
+        {
+            public T Member { get; }
+            
+            public MemberData(T member)
+            {
+                this.Member = member;
+            }
+
+            public override string ToString() => $"{this.Member.ReflectedType.FullName}.{this.Member}";
         }
     }
 }

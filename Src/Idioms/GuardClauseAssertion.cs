@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -459,13 +460,13 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
         {
             private readonly ISpecimenBuilder specimenBuilder;
             private readonly Type unclosedGenericType;
-            private readonly AutoGenericArgumentCollection autoGenericArguments;
+            private readonly Dictionary<string, Type> autoGenericArguments;
 
             public AutoGenericType(ISpecimenBuilder specimenBuilder, Type unclosedGenericType)
             {
                 this.specimenBuilder = specimenBuilder;
                 this.unclosedGenericType = unclosedGenericType;
-                this.autoGenericArguments = new AutoGenericArgumentCollection();
+                this.autoGenericArguments = new Dictionary<string, Type>();
             }
 
             public Type Value
@@ -514,30 +515,47 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             private Type ResolveGenericParameter(Type parameterType)
             {
                 return this.IsGenericTypeParameter(parameterType)
-                    ? this.autoGenericArguments[parameterType.Name].Value
+                    ? this.autoGenericArguments[parameterType.Name]
                     : parameterType;
             }
 
             private bool IsGenericTypeParameter(Type parameterType)
             {
                 return parameterType.IsGenericParameter
-                    && this.autoGenericArguments.Contains(parameterType.Name);
+                    && this.autoGenericArguments.ContainsKey(parameterType.Name);
             }
 
             private Type[] GetTypedArguments()
             {
-                return this.unclosedGenericType
+                var valuesOrBuilders = this.unclosedGenericType
                     .GetGenericArguments()
                     .Select(t =>
                     {
                         if (!t.IsGenericParameter)
                         {
-                            return t;
+                            return Tuple.Create(t, (AutoGenericArgumentBuilder)null);
                         }
 
-                        var autoGenericArgument = new AutoGenericArgument(this.specimenBuilder, t);
-                        this.autoGenericArguments.Add(autoGenericArgument);
-                        return autoGenericArgument.Value;
+                        var autoGenericArgument = new AutoGenericArgumentBuilder(this.specimenBuilder, t);
+
+                        return Tuple.Create(t, autoGenericArgument);
+                    })
+                    .ToArray();
+
+                var allArgumentBuilders = valuesOrBuilders
+                    .Select(x => x.Item2)
+                    .Where(x => x != null)
+                    .ToArray();
+
+                return valuesOrBuilders
+                    .Select(x =>
+                    {
+                        if (x.Item2 == null)
+                            return x.Item1;
+
+                        var builtType = x.Item2.Build(allArgumentBuilders);
+                        this.autoGenericArguments.Add(x.Item1.Name, builtType);
+                        return builtType;
                     })
                     .ToArray();
             }
@@ -565,18 +583,30 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
 
             private Type[] GetTypedArguments()
             {
-                return this.unclosedGenericMethod
+                var buildersOrValues = this.unclosedGenericMethod
                     .GetGenericArguments()
                     .Select(t => t.IsGenericParameter
-                        ? new AutoGenericArgument(this.specimenBuilder, t).Value
-                        : t)
+                        ? Tuple.Create<Type, AutoGenericArgumentBuilder>(null, new AutoGenericArgumentBuilder(this.specimenBuilder, t))
+                        : Tuple.Create<Type, AutoGenericArgumentBuilder>(t, null))
+                    .ToArray();
+
+                var allBuilders = buildersOrValues
+                    .Select(x => x.Item2)
+                    .Where(x => x != null)
+                    .ToArray();
+
+                return buildersOrValues
+                    .Select(builderOrValue =>
+                        builderOrValue.Item1 != null
+                            ? builderOrValue.Item1
+                            : builderOrValue.Item2.Build(allBuilders))
                     .ToArray();
             }
         }
 
-        private class AutoGenericArgumentCollection : KeyedCollection<string, AutoGenericArgument>
+        private class AutoGenericArgumentCollection : KeyedCollection<string, AutoGenericArgumentBuilder>
         {
-            protected override string GetKeyForItem(AutoGenericArgument item)
+            protected override string GetKeyForItem(AutoGenericArgumentBuilder item)
             {
                 if (item == null) throw new ArgumentNullException(nameof(item));
 
@@ -584,76 +614,61 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             }
         }
 
-        private class AutoGenericArgument
+        private class AutoGenericArgumentBuilder
         {
-            private readonly ISpecimenBuilder specimenBuilder;
-            private readonly Type genericArgument;
-            private Type value;
+            private readonly DynamicDummyTypeBuilder typeBuilder;
 
-            public AutoGenericArgument(ISpecimenBuilder specimenBuilder, Type genericArgument)
+            public AutoGenericArgumentBuilder(ISpecimenBuilder specimenBuilder, Type genericArgument)
             {
-                this.specimenBuilder = specimenBuilder;
-                this.genericArgument = genericArgument;
+                this.GenericArgument = genericArgument;
+                this.typeBuilder = new DynamicDummyTypeBuilder(
+                    specimenBuilder, 
+                    GetBaseType(genericArgument),
+                    GetInterfaces(genericArgument));
             }
 
-            public Type GenericArgument
+            public Type GenericArgument { get; }
+
+            public Type Build(IEnumerable<AutoGenericArgumentBuilder> allGenericArgumentBuilders)
             {
-                get
-                {
-                    return this.genericArgument;
-                }
+                var genericArgumentMappings = allGenericArgumentBuilders
+                    .ToDictionary(b => b.GenericArgument, b => b.typeBuilder);
+
+                return this.typeBuilder.BuildType(genericArgumentMappings);
             }
 
-            public Type Value
+            private static Type GetBaseType(Type genericArgument)
             {
-                get
-                {
-                    if (this.value == null)
-                    {
-                        this.value = new DynamicDummyType(
-                            this.specimenBuilder, this.GetBaseType(), this.GetInterfaces())
-                            .Value;
-                    }
-
-                    return this.value;
-                }
-            }
-
-            private Type GetBaseType()
-            {
-                if (this.HasClassConstraint())
+                if (HasClassConstraint(genericArgument))
                 {
                     return typeof(object);
                 }
 
-                return this.GetConstraintType() ?? typeof(ValueType);
+                return GetConstraintType(genericArgument) ?? typeof(ValueType);
             }
 
-            private Type GetConstraintType()
+            private static Type GetConstraintType(Type genericArgument)
             {
-                return this.GenericArgument
+                return genericArgument
                     .GetGenericParameterConstraints()
-                    .Where(t => !t.IsInterface)
-                    .SingleOrDefault();
+                    .SingleOrDefault(t => !t.IsInterface);
             }
 
-            private bool HasClassConstraint()
+            private static bool HasClassConstraint(Type genericArgument)
             {
-                return (this.GenericArgument.GenericParameterAttributes
-                    & GenericParameterAttributes.ReferenceTypeConstraint)
-                    == GenericParameterAttributes.ReferenceTypeConstraint;
+                return genericArgument.GenericParameterAttributes.HasFlag(GenericParameterAttributes.ReferenceTypeConstraint);
             }
 
-            private Type[] GetInterfaces()
+            private static Type[] GetInterfaces(Type genericArgument)
             {
-                return this.GenericArgument
+                return genericArgument
                     .GetGenericParameterConstraints()
                     .Where(t => t.IsInterface)
                     .ToArray();
             }
         }
 
-        private class DynamicDummyType
+        private class DynamicDummyTypeBuilder
         {
             private const string SpecimenBuilderFieldName = "specimenBuilder";
 
@@ -669,51 +684,80 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
                 typeof(SpecimenFactory).GetMethod("Create", new[] { typeof(ISpecimenBuilder) });
 
             private readonly ISpecimenBuilder specimenBuilder;
-            private readonly Type baseType;
-            private readonly Type[] interfaces;
+            private Type baseType;
+            private Type[] interfaces;
+            private readonly TypeBuilder typeBuilder;
             private ConstructorBuilder constructorBuilder;
-            private TypeBuilder typeBuilder;
             private MethodBuilder methodBuilder;
             private MethodInfo methodInfo;
             private FieldBuilder specimenBuilderFieldBuilder;
             private ConstructorInfo baseTypeConstructor;
+            private bool typeIsAlreadyBuilt = false;
 
-            public DynamicDummyType(ISpecimenBuilder specimenBuilder, Type baseType, Type[] interfaces)
+            public DynamicDummyTypeBuilder(ISpecimenBuilder specimenBuilder, Type baseType, Type[] interfaces)
             {
                 this.specimenBuilder = specimenBuilder;
                 this.baseType = baseType;
                 this.interfaces = interfaces;
+                this.typeBuilder = this.CreateTypeBuilder();
             }
 
-            public Type Value
+            public Type BuildType(IReadOnlyDictionary<Type, DynamicDummyTypeBuilder> knownGenericTypeMappings)
             {
-                get
+                if (this.typeIsAlreadyBuilt)
+                    throw new InvalidOperationException("Type can be built for the single time only.");
+
+                this.typeIsAlreadyBuilt = true;
+
+                this.baseType = SubstituteGenericTypeArguments(this.baseType, knownGenericTypeMappings);
+                this.interfaces = this.interfaces
+                    .Select(x => SubstituteGenericTypeArguments(x, knownGenericTypeMappings))
+                    .ToArray();
+
+                this.typeBuilder.SetParent(this.baseType);
+                foreach (var intefaceType in this.interfaces)
                 {
-                    this.DefineTypeBuilder();
-                    this.ImplementDefaultConstructor();
-                    this.ImplementAbstractMethods();
-                    this.ImplementInterfaceMethods();
-                    var dummyType = this.typeBuilder.CreateTypeInfo();
-                    this.SetStaticSpecimenBuilderField(dummyType);
-                    return dummyType;
+                    this.typeBuilder.AddInterfaceImplementation(intefaceType);
                 }
+
+                this.ImplementDefaultConstructor();
+                this.ImplementAbstractMethods();
+                this.ImplementInterfaceMethods();
+                
+                var dummyType = this.typeBuilder.CreateTypeInfo();
+                this.SetStaticSpecimenBuilderField(dummyType);
+                return dummyType;
             }
 
-            private void DefineTypeBuilder()
+            private TypeBuilder CreateTypeBuilder()
             {
                 lock (ModuleBuilder)
                 {
-                    this.typeBuilder = ModuleBuilder.DefineType(
+                    return ModuleBuilder.DefineType(
                         this.GetBaseTypeName(),
-                        TypeAttributes.Class | TypeAttributes.Public | TypeAttributes.Sealed,
-                        this.baseType,
-                        this.interfaces);
+                        TypeAttributes.Class | TypeAttributes.Public | TypeAttributes.Sealed);
                 }
             }
 
             private string GetBaseTypeName()
             {
-                return this.baseType.Name + Guid.NewGuid().ToString().Replace("-", string.Empty);
+                return this.baseType.Name + Guid.NewGuid().ToString("N");
+            }
+
+            private static Type SubstituteGenericTypeArguments(Type type, IReadOnlyDictionary<Type, DynamicDummyTypeBuilder> genericArguments)
+            {
+                if (genericArguments.TryGetValue(type, out var mappedType))
+                    return mappedType.typeBuilder.AsType();
+                
+                if (!type.IsGenericType)
+                    return type;
+
+                var genericTypeArguments = type
+                    .GetGenericArguments()
+                    .Select(t => SubstituteGenericTypeArguments(t, genericArguments))
+                    .ToArray();
+
+                return type.GetGenericTypeDefinition().MakeGenericType(genericTypeArguments);
             }
 
             private void ImplementDefaultConstructor()
