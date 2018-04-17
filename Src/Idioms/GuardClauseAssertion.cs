@@ -1,4 +1,4 @@
-﻿using System;
+﻿﻿using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -604,16 +604,6 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             }
         }
 
-        private class AutoGenericArgumentCollection : KeyedCollection<string, AutoGenericArgumentBuilder>
-        {
-            protected override string GetKeyForItem(AutoGenericArgumentBuilder item)
-            {
-                if (item == null) throw new ArgumentNullException(nameof(item));
-
-                return item.GenericArgument.Name;
-            }
-        }
-
         private class AutoGenericArgumentBuilder
         {
             private readonly DynamicDummyTypeBuilder typeBuilder;
@@ -675,7 +665,7 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             private static readonly AssemblyBuilder AssemblyBuilder =
                 AssemblyBuilder.DefineDynamicAssembly(
                     new AssemblyName("AutoFixture.DynamicProxyAssembly"),
-                    AssemblyBuilderAccess.Run);
+                    AssemblyBuilderAccess.RunAndSave);
 
             private static readonly ModuleBuilder ModuleBuilder =
                 AssemblyBuilder.DefineDynamicModule("DynamicProxyModule");
@@ -684,14 +674,18 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
                 typeof(SpecimenFactory).GetMethod("Create", new[] { typeof(ISpecimenBuilder) });
 
             private readonly ISpecimenBuilder specimenBuilder;
-            private Type baseType;
-            private Type[] interfaces;
+            private readonly Type baseType;
+            private readonly Type[] interfaces;
             private readonly TypeBuilder typeBuilder;
+
+            private ConstructedTypeWrapper constructedBaseType;
+            private ConstructedTypeWrapper[] constructedInterfaces;
             private ConstructorBuilder constructorBuilder;
             private MethodBuilder methodBuilder;
             private MethodInfo methodInfo;
             private FieldBuilder specimenBuilderFieldBuilder;
             private ConstructorInfo baseTypeConstructor;
+            private IReadOnlyDictionary<Type, DynamicDummyTypeBuilder> genericParameterMappings;
             private bool typeIsAlreadyBuilt = false;
 
             public DynamicDummyTypeBuilder(ISpecimenBuilder specimenBuilder, Type baseType, Type[] interfaces)
@@ -708,16 +702,17 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
                     throw new InvalidOperationException("Type can be built for the single time only.");
 
                 this.typeIsAlreadyBuilt = true;
-
-                this.baseType = SubstituteGenericTypeArguments(this.baseType, knownGenericTypeMappings);
-                this.interfaces = this.interfaces
-                    .Select(x => SubstituteGenericTypeArguments(x, knownGenericTypeMappings))
+                this.genericParameterMappings = knownGenericTypeMappings;
+                
+                this.constructedBaseType = this.SubstituteGenericTypeArguments(this.baseType);
+                this.constructedInterfaces = this.interfaces
+                    .Select(this.SubstituteGenericTypeArguments)
                     .ToArray();
 
-                this.typeBuilder.SetParent(this.baseType);
-                foreach (var intefaceType in this.interfaces)
+                this.typeBuilder.SetParent(this.constructedBaseType.EncosedType);
+                foreach (var intefaceType in this.constructedInterfaces)
                 {
-                    this.typeBuilder.AddInterfaceImplementation(intefaceType);
+                    this.typeBuilder.AddInterfaceImplementation(intefaceType.EncosedType);
                 }
 
                 this.ImplementDefaultConstructor();
@@ -726,6 +721,7 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
                 
                 var dummyType = this.typeBuilder.CreateTypeInfo();
                 this.SetStaticSpecimenBuilderField(dummyType);
+                
                 return dummyType;
             }
 
@@ -744,20 +740,31 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
                 return this.baseType.Name + Guid.NewGuid().ToString("N");
             }
 
-            private static Type SubstituteGenericTypeArguments(Type type, IReadOnlyDictionary<Type, DynamicDummyTypeBuilder> genericArguments)
+            private ConstructedTypeWrapper SubstituteGenericTypeArguments(Type type)
             {
-                if (genericArguments.TryGetValue(type, out var mappedType))
-                    return mappedType.typeBuilder.AsType();
+                if (this.genericParameterMappings.TryGetValue(type, out var mappedType))
+                    return ConstructedTypeWrapper.FromGenericParameterType(mappedType.typeBuilder.AsType());
                 
                 if (!type.IsGenericType)
-                    return type;
+                    return ConstructedTypeWrapper.FromType(type);
 
+                bool containsDynamicTypeArguments = false;
                 var genericTypeArguments = type
                     .GetGenericArguments()
-                    .Select(t => SubstituteGenericTypeArguments(t, genericArguments))
+                    .Select(t =>
+                    {
+                        var r = this.SubstituteGenericTypeArguments(t);
+                        if (r.ConstructedFromDynamicGenericTypes | r.IsDynamicGenericParameterType)
+                            containsDynamicTypeArguments = true;
+                        
+                        return r.EncosedType;
+                    })
                     .ToArray();
 
-                return type.GetGenericTypeDefinition().MakeGenericType(genericTypeArguments);
+                var resultType = type.GetGenericTypeDefinition().MakeGenericType(genericTypeArguments);
+                return containsDynamicTypeArguments
+                    ? ConstructedTypeWrapper.FromConstructedType(resultType)
+                    : ConstructedTypeWrapper.FromType(resultType);
             }
 
             private void ImplementDefaultConstructor()
@@ -776,7 +783,7 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             private void SetBaseTypeConstructor()
             {
                 this.baseTypeConstructor =
-                    this.baseType
+                    this.constructedBaseType
                         .GetConstructors(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                         .Where(c => c.IsPublic || c.IsFamilyOrAssembly || c.IsFamily)
                         .OrderBy(c => c.GetParameters().Length)
@@ -804,12 +811,7 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             private void EmitDefaultConstructor()
             {
                 var generator = this.constructorBuilder.GetILGenerator();
-                if (this.baseTypeConstructor.GetParameters().Any())
-                {
-                    this.DefineStaticSpecimenBuilderFieldBuilder();
-                    this.EmitCallBaseTypeConstructor(generator);
-                }
-
+                this.EmitCallBaseTypeConstructor(generator);
                 generator.Emit(OpCodes.Ret);
             }
 
@@ -829,6 +831,7 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             private void EmitCallBaseTypeConstructor(ILGenerator generator)
             {
                 generator.Emit(OpCodes.Ldarg_0);
+                
                 foreach (var parameterInfo in this.baseTypeConstructor.GetParameters())
                 {
                     this.EmitCallFixtureCreate(generator, parameterInfo.ParameterType);
@@ -839,6 +842,7 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
 
             private void EmitCallFixtureCreate(ILGenerator generator, Type returnType)
             {
+                this.DefineStaticSpecimenBuilderFieldBuilder();
                 generator.Emit(OpCodes.Ldsfld, this.specimenBuilderFieldBuilder);
                 generator.Emit(OpCodes.Call, FixtureCreateGenericMethod.MakeGenericMethod(returnType));
             }
@@ -854,15 +858,15 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
 
             private void ImplementInterfaceMethods()
             {
-                foreach (var @interface in this.interfaces)
+                foreach (var @interface in this.constructedInterfaces)
                 {
                     this.ImplementInterfaceMethods(@interface);
                 }
             }
 
-            private void ImplementInterfaceMethods(Type @interface)
+            private void ImplementInterfaceMethods(ConstructedTypeWrapper @interface)
             {
-                foreach (var method in @interface.GetMethods())
+                foreach (var method in @interface.GetMethods(BindingFlags.Instance | BindingFlags.Public))
                 {
                     this.methodInfo = method;
                     this.ImplementMethod();
@@ -870,13 +874,13 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
 
                 foreach (Type parentType in @interface.GetInterfaces())
                 {
-                    this.ImplementInterfaceMethods(parentType);
+                    this.ImplementInterfaceMethods(ConstructedTypeWrapper.FromType(parentType));
                 }
             }
 
             private IEnumerable<MethodInfo> GetAbstractMethods()
             {
-                return this.typeBuilder.BaseType
+                return this.constructedBaseType
                     .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
                     .Where(m => m.IsAbstract);
             }
@@ -884,19 +888,42 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
             private void ImplementMethod()
             {
                 this.DefineMethodBuilder();
-                this.DefineStaticSpecimenBuilderFieldBuilder();
                 this.EmitReturningDefaultValue();
             }
 
             private void DefineMethodBuilder()
             {
+                var parameterTypes = this.methodInfo.GetParameters().Select(p => p.ParameterType).ToArray();
+                var returnType = this.methodInfo.ReturnType;
+                
+                if (parameterTypes.Any(p => p.IsGenericParameter) || returnType.IsGenericParameter)
+                {
+                    var declaringType = this.methodInfo.DeclaringType;
+                    var declaringTypeGenericParameters = declaringType.GenericTypeArguments;
+                    var mappings = declaringType.GetGenericTypeDefinition().GetGenericArguments()
+                        .Select((v, idx) => Tuple.Create(idx, v))
+                        .ToDictionary(t => t.Item2, t => declaringTypeGenericParameters[t.Item1]);
+
+                    parameterTypes = parameterTypes
+                        .Select(paramType =>
+                            paramType.IsGenericParameter && mappings.TryGetValue(paramType, out var closedType)
+                                ? closedType
+                                : paramType)
+                        .ToArray();
+
+                    returnType = returnType.IsGenericParameter && mappings.TryGetValue(returnType, out var closedRetType)
+                        ? closedRetType
+                        : returnType;
+                }
+                
                 this.methodBuilder = this.typeBuilder.DefineMethod(
                     this.methodInfo.Name,
                     MethodAttributes.Public | MethodAttributes.Virtual,
                     CallingConventions.Standard,
-                    this.methodInfo.ReturnType,
-                    this.methodInfo.GetParameters().Select(p => p.ParameterType).ToArray());
+                    returnType,
+                    parameterTypes);
             }
+            
 
             private void EmitReturningDefaultValue()
             {
@@ -918,6 +945,66 @@ See e.g. http://codeblog.jonskeet.uk/2008/03/02/c-4-idea-iterator-blocks-and-par
 
                 dummyType.GetField(SpecimenBuilderFieldName, BindingFlags.Static | BindingFlags.NonPublic)
                     .SetValue(null, this.specimenBuilder);
+            }
+        }
+
+        private class ConstructedTypeWrapper
+        {
+            public static ConstructedTypeWrapper FromType(Type type) =>
+                new ConstructedTypeWrapper(type, false, false);
+            
+            public static ConstructedTypeWrapper FromConstructedType(Type type) =>
+                new ConstructedTypeWrapper(type, true, false);
+            
+            public static ConstructedTypeWrapper FromGenericParameterType(Type type) =>
+                new ConstructedTypeWrapper(type, false, true);
+            
+            public Type EncosedType { get; }
+            public bool IsDynamicGenericParameterType { get; }
+            public bool ConstructedFromDynamicGenericTypes { get; }
+
+            private ConstructedTypeWrapper(Type type, bool constructedFromDynamicGenericTypes, bool isDynamicGenericParameterType)
+            {
+                this.EncosedType = type;
+                this.IsDynamicGenericParameterType = isDynamicGenericParameterType;
+                this.ConstructedFromDynamicGenericTypes = constructedFromDynamicGenericTypes;
+            }
+
+
+            public ConstructorInfo[] GetConstructors(BindingFlags bindingFlags)
+            {
+                if (!this.ConstructedFromDynamicGenericTypes)
+                    return this.EncosedType.GetConstructors(bindingFlags);
+
+                var genericCtors = this.EncosedType.GetGenericTypeDefinition().GetConstructors(bindingFlags);
+                return genericCtors
+                    .Select(gCtor => TypeBuilder.GetConstructor(this.EncosedType, gCtor))
+                    .ToArray();
+            }
+
+            public MethodInfo[] GetMethods(BindingFlags bindingFlags)
+            {
+                if (!this.ConstructedFromDynamicGenericTypes)
+                    return this.EncosedType.GetMethods(bindingFlags);
+
+                var gtd = this.EncosedType.GetGenericTypeDefinition();
+                var genericMethods = gtd.GetMethods(bindingFlags);
+                return genericMethods
+                    .Select(gMethod => gMethod.DeclaringType == gtd
+                        ? TypeBuilder.GetMethod(this.EncosedType, gMethod)
+                        : gMethod)
+                    .ToArray();
+            }
+
+            public IEnumerable<Type> GetInterfaces()
+            {
+                if (!this.ConstructedFromDynamicGenericTypes)
+                    return this.EncosedType.GetInterfaces();
+
+                var gtd = this.EncosedType.GetGenericTypeDefinition();
+                return gtd.GetInterfaces();
+
+                return null;
             }
         }
     }

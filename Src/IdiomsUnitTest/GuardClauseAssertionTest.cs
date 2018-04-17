@@ -1145,14 +1145,13 @@ namespace AutoFixture.IdiomsUnitTest
             {
 /*                yield return typeof(NoContraint<>);
                 yield return typeof(InterfacesContraint<>);
-                yield return typeof(StructureAndInterfacesContraint<>);*/
-                yield return typeof(GenericArgumentUsingConstrain_3<>);
-/*                yield return typeof(GenericArgumentUsingConstrain_2<,>);
-                yield return typeof(GenericArgumentUsingConstrain_3<>);
-                yield return typeof(GenericArgumentUsingConstrain_4<,>);
+                yield return typeof(StructureAndInterfacesContraint<>);
                 yield return typeof(ParameterizedConstructorTestConstraint<>);
                 yield return typeof(UnclosedGenericMethodTestType<>);
-                yield return typeof(NestedGenericParameterTestType<,>);*/
+                yield return typeof(NestedGenericParameterTestType<,>);
+                yield return typeof(GenericArgumentUsingConstrain_1<>);
+                yield return typeof(GenericArgumentUsingConstrain_2<,>);*/
+                yield return typeof(GenericArgumentUsingConstrain_4<,>);
             }
 
             IEnumerator IEnumerable.GetEnumerator()
@@ -1177,6 +1176,7 @@ namespace AutoFixture.IdiomsUnitTest
                 yield return typeof(ConstructorMatchTestType<,>);
                 yield return typeof(MethodMatchTestType<,>);
                 yield return typeof(ByRefTestType<>);
+                yield return typeof(GenericArgumentUsingConstrain_3<>);
             }
 
             IEnumerator IEnumerable.GetEnumerator()
